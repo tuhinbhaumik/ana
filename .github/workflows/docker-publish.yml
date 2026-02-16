@@ -1,0 +1,132 @@
+# ============================================================
+# ANA - Agentic Network Assistant
+# GitHub Actions: Build & Publish Container Image to GHCR
+# ============================================================
+# This workflow:
+#   1. Builds the Docker image on push to main or tags
+#   2. Publishes to GitHub Container Registry (ghcr.io)
+#   3. Creates a GitHub Release with install instructions
+# ============================================================
+
+name: Build & Publish Container Image
+
+on:
+  push:
+    branches: [ "main", "master" ]
+    tags: [ "v*.*.*" ]
+  pull_request:
+    branches: [ "main", "master" ]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  # ── Build and Push Docker Image ─────────────────────────
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      # Checkout source code
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Set up Docker Buildx for multi-platform builds
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Login to GitHub Container Registry
+      - name: Log in to GitHub Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Extract metadata (tags, labels) for Docker
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      # Build and push Docker image
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: linux/amd64,linux/arm64
+
+      # Print image info
+      - name: Image published
+        if: github.event_name != 'pull_request'
+        run: |
+          echo "============================================"
+          echo "  Docker image published to GHCR!"
+          echo "============================================"
+          echo "  Pull with:"
+          echo "    docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest"
+          echo ""
+          echo "  Run with:"
+          echo "    docker run -d -p 8501:8501 -p 9000:9000 ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest"
+          echo "============================================"
+
+  # ── Create Release (only on tags) ───────────────────────
+  release:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          generate_release_notes: true
+          body: |
+            ## ANA - Agentic Network Assistant ${{ github.ref_name }}
+
+            ### Quick Install (Docker)
+            ```bash
+            docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}
+            docker run -d -p 8501:8501 -p 9000:9000 --name ana ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}
+            ```
+
+            ### Quick Install (Manual)
+            ```bash
+            git clone https://github.com/${{ github.repository }}.git
+            cd ANA
+            # Linux/macOS:
+            chmod +x scripts/install.sh && ./scripts/install.sh
+            # Windows:
+            scripts\install.bat
+            ```
+
+            ### Access
+            - **Frontend:** http://localhost:8501
+            - **API Docs:** http://localhost:9000/docs
+            - **Default Login:** admin / admin123
+
+            See [INSTALL.md](./INSTALL.md) for full installation options.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

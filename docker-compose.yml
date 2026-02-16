@@ -1,0 +1,39 @@
+# ============================================================
+# ANA - Agentic Network Assistant
+# Docker Compose Configuration
+# ============================================================
+# Usage:
+#   docker compose up -d          # Start all services
+#   docker compose down           # Stop all services
+#   docker compose logs -f        # View live logs
+#   docker compose up -d --build  # Rebuild and start
+# ============================================================
+
+services:
+  ana:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ana
+    ports:
+      - "${ANA_FRONTEND_PORT:-8501}:8501"   # Streamlit UI
+      - "${ANA_BACKEND_PORT:-9000}:9000"    # FastAPI API
+    environment:
+      - API_BASE=http://localhost:${ANA_BACKEND_PORT:-9000}
+      - ANA_BACKEND_PORT=${ANA_BACKEND_PORT:-9000}
+      - ANA_FRONTEND_PORT=${ANA_FRONTEND_PORT:-8501}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - MISTRAL_API_URL=${MISTRAL_API_URL:-}
+    volumes:
+      - ana-data:/app/db                     # Persist database
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:9000/api/health')"]
+      interval: 30s
+      timeout: 10s
+      start_period: 15s
+      retries: 3
+
+volumes:
+  ana-data:
+    driver: local
